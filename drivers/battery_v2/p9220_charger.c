@@ -2391,7 +2391,7 @@ static int p9220_charger_probe(
 	charger->pdata->tx_data_val = 0;
 
 	charger->psy_chg.name		= pdata->wireless_charger_name;
-	charger->psy_chg.type		= POWER_SUPPLY_TYPE_UNKNOWN;
+	charger->psy_chg.type		= POWER_SUPPLY_TYPE_WIRELESS;
 	charger->psy_chg.get_property	= p9220_chg_get_property;
 	charger->psy_chg.set_property	= p9220_chg_set_property;
 	charger->psy_chg.properties	= sec_charger_props;
