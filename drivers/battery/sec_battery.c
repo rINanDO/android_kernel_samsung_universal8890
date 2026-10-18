@@ -182,6 +182,8 @@ static struct device_attribute sec_battery_attrs[] = {
 #if defined(CONFIG_BATTERY_SWELLING)
 	SEC_BATTERY_ATTR(batt_swelling_control),
 #endif
+	SEC_BATTERY_ATTR(charge_start_level),
+	SEC_BATTERY_ATTR(charge_stop_level),
 };
 
 static enum power_supply_property sec_battery_props[] = {
@@ -3631,6 +3633,50 @@ static void sec_bat_misc_event_work(struct work_struct *work)
 	queue_delayed_work(battery->monitor_wqueue, &battery->monitor_work, 0);
 }
 
+/*
+ * Like store mode, but with levels set from userspace: stop charging once
+ * the battery reaches charge_stop_level and resume at charge_start_level.
+ * The charger stays attached, so the device runs from it meanwhile.
+ * A stop level of 100 disables the limit.
+ */
+static void sec_bat_check_charge_limit(struct sec_battery_info *battery)
+{
+	bool limit = battery->charge_stop_level < 100;
+
+	if (battery->cable_type == POWER_SUPPLY_TYPE_BATTERY ||
+	    battery->cable_type == POWER_SUPPLY_TYPE_OTG) {
+		battery->charge_limit_stopped = false;
+		return;
+	}
+
+	if (limit && battery->capacity >= battery->charge_stop_level) {
+		if (!battery->charge_limit_stopped)
+			dev_info(battery->dev,
+				 "%s: stop charging at %d%% (stop %d%%, start %d%%)\n",
+				 __func__, battery->capacity,
+				 battery->charge_stop_level,
+				 battery->charge_start_level);
+		battery->charge_limit_stopped = true;
+	} else if (battery->charge_limit_stopped &&
+		   (!limit || battery->capacity <= battery->charge_start_level)) {
+		dev_info(battery->dev, "%s: resume charging at %d%%\n",
+			 __func__, battery->capacity);
+		battery->charge_limit_stopped = false;
+		if (battery->health == POWER_SUPPLY_HEALTH_GOOD) {
+			sec_bat_set_charging_status(battery,
+					POWER_SUPPLY_STATUS_CHARGING);
+			sec_bat_set_charge(battery, SEC_BAT_CHG_MODE_CHARGING);
+		}
+		return;
+	}
+
+	if (battery->charge_limit_stopped) {
+		sec_bat_set_charging_status(battery,
+				POWER_SUPPLY_STATUS_DISCHARGING);
+		sec_bat_set_charge(battery, SEC_BAT_CHG_MODE_CHARGING_OFF);
+	}
+}
+
 static void sec_bat_monitor_work(
 				struct work_struct *work)
 {
@@ -3844,6 +3890,7 @@ continue_monitor:
 			sec_bat_set_charge(battery, SEC_BAT_CHG_MODE_CHARGING);
 		}
 	}
+	sec_bat_check_charge_limit(battery);
 	power_supply_changed(&battery->psy_bat);
 
 skip_monitor:
@@ -4939,6 +4986,14 @@ ssize_t sec_bat_show_attrs(struct device *dev,
 				   battery->skip_swelling);
 		break;
 #endif
+	case CHARGE_START_LEVEL:
+		i += scnprintf(buf + i, PAGE_SIZE - i, "%d\n",
+			battery->charge_start_level);
+		break;
+	case CHARGE_STOP_LEVEL:
+		i += scnprintf(buf + i, PAGE_SIZE - i, "%d\n",
+			battery->charge_stop_level);
+		break;
 	default:
 		i = -EINVAL;
 		break;
@@ -5961,6 +6016,21 @@ ssize_t sec_bat_store_attrs(
 		}
 		break;
 #endif
+	case CHARGE_START_LEVEL:
+	case CHARGE_STOP_LEVEL:
+		if (sscanf(buf, "%10d\n", &x) == 1) {
+			if (x < 0 || x > 100)
+				return -EINVAL;
+			if (offset == CHARGE_START_LEVEL)
+				battery->charge_start_level = x;
+			else
+				battery->charge_stop_level = x;
+			wake_lock(&battery->monitor_wake_lock);
+			queue_delayed_work(battery->monitor_wqueue,
+				&battery->monitor_work, 0);
+			ret = count;
+		}
+		break;
 	default:
 		ret = -EINVAL;
 	}
@@ -8196,6 +8266,9 @@ static int sec_battery_probe(struct platform_device *pdev)
 	battery->cable_type = POWER_SUPPLY_TYPE_BATTERY;
 	battery->test_mode = 0;
 	battery->factory_mode = false;
+	battery->charge_start_level = 0;
+	battery->charge_stop_level = 100;
+	battery->charge_limit_stopped = false;
 #if defined(CONFIG_STORE_MODE)
 	battery->store_mode = false;
 	value.intval = battery->store_mode;

@@ -294,6 +294,11 @@ struct sec_battery_info {
 	bool ignore_store_mode;
 	bool slate_mode;
 
+	/* charge limit set through charge_start_level/charge_stop_level */
+	int charge_start_level;
+	int charge_stop_level;
+	bool charge_limit_stopped;
+
 	/* MTBF test for CMCC */
 	bool is_hc_usb;
 
@@ -521,6 +526,8 @@ enum {
 #if defined(CONFIG_BATTERY_SWELLING)
 	BATT_SWELLING_CONTROL,
 #endif
+	CHARGE_START_LEVEL,
+	CHARGE_STOP_LEVEL,
 };
 
 enum {
