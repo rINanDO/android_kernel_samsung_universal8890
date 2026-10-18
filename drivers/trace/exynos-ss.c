@@ -3598,6 +3598,7 @@ EXPORT_SYMBOL(exynos_ss_hook_pmsg);
 #ifdef CONFIG_EXYNOS_SNAPSHOT_PSTORE
 static struct ramoops_platform_data ess_ramoops_data = {
 	.record_size	= SZ_4K,
+	.console_size	= SZ_4K,
 	.pmsg_size	= SZ_4K,
 	.dump_oops	= 1,
 };
@@ -3614,8 +3615,19 @@ static int __init ess_pstore_init(void)
 	if (exynos_ss_get_enable("log_pstore", true)) {
 		ess_ramoops_data.mem_size = exynos_ss_get_item_size("log_pstore");
 		ess_ramoops_data.mem_address = exynos_ss_get_item_paddr("log_pstore");
-		ess_ramoops_data.pmsg_size = ess_ramoops_data.mem_size / 2;
-		ess_ramoops_data.record_size = ess_ramoops_data.mem_size / 2;
+		/*
+		 * Originally split 50/50 between pmsg (userspace log) and
+		 * record (oops/panic kmsg_dump snapshot) with no console
+		 * buffer at all - CONFIG_PSTORE_CONSOLE=y in the defconfig
+		 * was therefore a no-op, since the ramoops backend never
+		 * allocated a zone for it. A continuous console mirror is
+		 * the only way to see what the kernel was doing right up to
+		 * a hang/watchdog reset when no software panic() ever fires
+		 * (so record_size's kmsg_dump snapshot never gets written).
+		 */
+		ess_ramoops_data.pmsg_size = ess_ramoops_data.mem_size / 3;
+		ess_ramoops_data.console_size = ess_ramoops_data.mem_size / 3;
+		ess_ramoops_data.record_size = ess_ramoops_data.mem_size / 3;
 	}
 	return platform_device_register(&ess_ramoops);
 }
